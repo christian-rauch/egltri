@@ -151,6 +151,7 @@ static void
 create_shaders(void)
 {
    static const char *fragShaderText =
+      "precision mediump float;\n"
       "varying vec4 v_color;\n"
       "void main() {\n"
       "   gl_FragColor = v_color;\n"
@@ -348,11 +349,6 @@ make_x_window(Display *x_dpy, EGLDisplay egl_dpy,
           printf("Error: eglQueryContext failed\n");
           exit(1);
       }
-      if(val!=2) {
-          printf("EGL_CONTEXT_CLIENT_VERSION is %i, expected 2\n", val);
-          exit(1);
-      }
-      assert(val == 2);
    }
 #endif
 
