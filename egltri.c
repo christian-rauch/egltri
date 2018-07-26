@@ -6,11 +6,14 @@
  **************************************************************************/
 
 /*
- * Draw a triangle with X/EGL and OpenGL ES 2.x
+ * Draw a triangle with X/EGL and OpenGL ES 2.x or OpenGL
  */
 
-// #define USE_FULL_GL 0
-#define USE_FULL_GL 1
+// gcc egltri.c -o egltri -lEGL -lm -lGL -lX11 -DUSE_FULL_GL=1
+
+#ifndef USE_FULL_GL
+    #define USE_FULL_GL 1
+#endif
 
 #include <assert.h>
 #include <math.h>
@@ -21,9 +24,19 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #if USE_FULL_GL
-#include "gl_wrap.h"  /* use full OpenGL */
+    #ifdef __APPLE__
+        #include <OpenGL/gl.h>
+        #include <OpenGL/glu.h>
+    #else
+        #include <GL/gl.h>
+        #include <GL/glu.h>
+    #endif
+
+    #ifndef GLAPIENTRY
+        #define GLAPIENTRY
+    #endif
 #else
-#include <GLES2/gl2.h>  /* use OpenGL ES 2.x */
+    #include <GLES2/gl2.h>  /* use OpenGL ES 2.x */
 #endif
 #include <EGL/egl.h>
 
@@ -485,8 +498,13 @@ main(int argc, char *argv[])
    s = eglQueryString(egl_dpy, EGL_CLIENT_APIS);
    printf("EGL_CLIENT_APIS = %s\n", s);
 
+#if USE_FULL_GL
+   const char window_title[] = "OpenGL EGL tri";
+#else
+   const char window_title[] = "OpenGL ES 2.x tri";
+#endif
    make_x_window(x_dpy, egl_dpy,
-                 "OpenGL ES 2.x tri", 0, 0, winWidth, winHeight,
+                 window_title, 0, 0, winWidth, winHeight,
                  &win, &egl_ctx, &egl_surf);
 
    XMapWindow(x_dpy, win);

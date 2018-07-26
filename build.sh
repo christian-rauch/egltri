@@ -1,1 +1,1 @@
-gcc es2tri.c -o es2tri -lEGL -lm -lGL -lX11
+gcc egltri.c -o egltri -lEGL -lm -lGL -lX11 -DUSE_FULL_GL=1
