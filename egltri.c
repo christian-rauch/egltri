@@ -344,7 +344,14 @@ make_x_window(Display *x_dpy, EGLDisplay egl_dpy,
    /* test eglQueryContext() */
    {
       EGLint val;
-      eglQueryContext(egl_dpy, ctx, EGL_CONTEXT_CLIENT_VERSION, &val);
+      if(!eglQueryContext(egl_dpy, ctx, EGL_CONTEXT_CLIENT_VERSION, &val)) {
+          printf("Error: eglQueryContext failed\n");
+          exit(1);
+      }
+      if(val!=2) {
+          printf("EGL_CONTEXT_CLIENT_VERSION is %i, expected 2\n", val);
+          exit(1);
+      }
       assert(val == 2);
    }
 #endif
