@@ -5,6 +5,7 @@ add_definitions(-DUSE_FULL_GL=1)
 
 find_package(OpenGL REQUIRED COMPONENTS OpenGL EGL)
 find_package(X11 REQUIRED)
+find_package(Threads REQUIRED)
 
 add_executable(${PROJECT_NAME} egltri.c)
-target_link_libraries(${PROJECT_NAME} OpenGL::EGL ${X11_LIBRARIES} m)
+target_link_libraries(${PROJECT_NAME} OpenGL::EGL ${X11_LIBRARIES} m ${CMAKE_THREAD_LIBS_INIT})

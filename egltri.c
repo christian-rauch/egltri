@@ -26,10 +26,8 @@
 #if USE_FULL_GL
     #ifdef __APPLE__
         #include <OpenGL/gl.h>
-        #include <OpenGL/glu.h>
     #else
         #include <GL/gl.h>
-        #include <GL/glu.h>
     #endif
 
     #ifndef GLAPIENTRY
@@ -38,11 +36,20 @@
 #else
     #include <GLES2/gl2.h>  /* use OpenGL ES 2.x */
 #endif
+
 #include <EGL/egl.h>
+#include <pthread.h>
 
-
-#define FLOAT_TO_FIXED(X)   ((X) * 65535.0)
-
+#define CheckEGLDieOnError() _CheckEGLDieOnError( __FILE__, __LINE__ );
+void _CheckEGLDieOnError( const char *sFile, const int nLine )
+{
+    EGLint eglError = eglGetError();
+    if( eglError != EGL_SUCCESS ) {
+        printf("EGL Error: %s (%x)\n", "XX", eglError );
+        printf("In: %s, line %d\n", sFile, nLine);
+        exit(EXIT_FAILURE);
+    }
+}
 
 
 static GLfloat view_rotx = 0.0, view_roty = 0.0;
@@ -50,6 +57,34 @@ static GLfloat view_rotx = 0.0, view_roty = 0.0;
 static GLint u_matrix = -1;
 static GLint attr_pos = 0, attr_color = 1;
 
+struct egl_context_t
+{
+    Display *x_dpy;
+    Window win;
+    EGLSurface egl_surf;
+    EGLDisplay egl_dpy;
+    EGLConfig egl_cfg;
+    EGLContext egl_ctx;
+};
+
+static const EGLint attribs[] = {
+   EGL_RED_SIZE, 1,
+   EGL_GREEN_SIZE, 1,
+   EGL_BLUE_SIZE, 1,
+   EGL_DEPTH_SIZE, 1,
+   EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+   EGL_NONE
+};
+#if USE_FULL_GL
+static const EGLint ctx_attribs[] = {
+    EGL_NONE
+};
+#else
+static const EGLint ctx_attribs[] = {
+   EGL_CONTEXT_CLIENT_VERSION, 2,
+   EGL_NONE
+};
+#endif
 
 static void
 make_z_rot_matrix(GLfloat angle, GLfloat *m)
@@ -250,27 +285,9 @@ make_x_window(Display *x_dpy, EGLDisplay egl_dpy,
               int x, int y, int width, int height,
               Window *winRet,
               EGLContext *ctxRet,
-              EGLSurface *surfRet)
+              EGLSurface *surfRet,
+              EGLConfig *cfgRet)
 {
-   static const EGLint attribs[] = {
-      EGL_RED_SIZE, 1,
-      EGL_GREEN_SIZE, 1,
-      EGL_BLUE_SIZE, 1,
-      EGL_DEPTH_SIZE, 1,
-      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-      EGL_NONE
-   };
-#if USE_FULL_GL
-   static const EGLint ctx_attribs[] = {
-       EGL_NONE
-   };
-#else
-   static const EGLint ctx_attribs[] = {
-      EGL_CONTEXT_CLIENT_VERSION, 2,
-      EGL_NONE
-   };
-#endif
-
    int scrnum;
    XSetWindowAttributes attr;
    unsigned long mask;
@@ -279,22 +296,21 @@ make_x_window(Display *x_dpy, EGLDisplay egl_dpy,
    XVisualInfo *visInfo, visTemplate;
    int num_visuals;
    EGLContext ctx;
-   EGLConfig config;
    EGLint num_configs;
    EGLint vid;
 
    scrnum = DefaultScreen( x_dpy );
    root = RootWindow( x_dpy, scrnum );
 
-   if (!eglChooseConfig( egl_dpy, attribs, &config, 1, &num_configs)) {
+   if (!eglChooseConfig( egl_dpy, attribs, cfgRet, 1, &num_configs)) {
       printf("Error: couldn't get an EGL visual config\n");
       exit(1);
    }
 
-   assert(config);
+   assert(*cfgRet);
    assert(num_configs > 0);
 
-   if (!eglGetConfigAttrib(egl_dpy, config, EGL_NATIVE_VISUAL_ID, &vid)) {
+   if (!eglGetConfigAttrib(egl_dpy, *cfgRet, EGL_NATIVE_VISUAL_ID, &vid)) {
       printf("Error: eglGetConfigAttrib() failed\n");
       exit(1);
    }
@@ -337,7 +353,7 @@ make_x_window(Display *x_dpy, EGLDisplay egl_dpy,
    eglBindAPI(EGL_OPENGL_ES_API);
 #endif
 
-   ctx = eglCreateContext(egl_dpy, config, EGL_NO_CONTEXT, ctx_attribs );
+   ctx = eglCreateContext(egl_dpy, *cfgRet, EGL_NO_CONTEXT, ctx_attribs );
    if (!ctx) {
       printf("Error: eglCreateContext failed\n");
       exit(1);
@@ -354,7 +370,7 @@ make_x_window(Display *x_dpy, EGLDisplay egl_dpy,
    }
 #endif
 
-   *surfRet = eglCreateWindowSurface(egl_dpy, config, win, NULL);
+   *surfRet = eglCreateWindowSurface(egl_dpy, *cfgRet, win, NULL);
    if (!*surfRet) {
       printf("Error: eglCreateWindowSurface failed\n");
       exit(1);
@@ -367,7 +383,7 @@ make_x_window(Display *x_dpy, EGLDisplay egl_dpy,
       assert(val == width);
       eglQuerySurface(egl_dpy, *surfRet, EGL_HEIGHT, &val);
       assert(val == height);
-      assert(eglGetConfigAttrib(egl_dpy, config, EGL_SURFACE_TYPE, &val));
+      assert(eglGetConfigAttrib(egl_dpy, *cfgRet, EGL_SURFACE_TYPE, &val));
       assert(val & EGL_WINDOW_BIT);
    }
 
@@ -379,9 +395,30 @@ make_x_window(Display *x_dpy, EGLDisplay egl_dpy,
 
 
 static void
-event_loop(Display *dpy, Window win,
-           EGLDisplay egl_dpy, EGLSurface egl_surf)
+event_loop(void *egl_params)
 {
+    struct egl_context_t *egl_context = ((struct egl_context_t *)egl_params);
+
+    Display *dpy = egl_context->x_dpy;
+    EGLSurface egl_surf = egl_context->egl_surf;
+    EGLDisplay egl_dpy = egl_context->egl_dpy;
+
+    CheckEGLDieOnError();
+
+#if USE_FULL_GL
+   eglBindAPI(EGL_OPENGL_API);
+#else
+   eglBindAPI(EGL_OPENGL_ES_API);
+#endif
+
+    EGLContext newctx = eglCreateContext(egl_context->egl_dpy, egl_context->egl_cfg, egl_context->egl_ctx, ctx_attribs);
+    if (!newctx) {
+       printf("Error: eglCreateContext failed\n");
+    }
+    CheckEGLDieOnError();
+    eglMakeCurrent(egl_dpy, egl_surf, egl_surf, newctx);
+    CheckEGLDieOnError();
+
    while (1) {
       int redraw = 0;
       XEvent event;
@@ -426,11 +463,17 @@ event_loop(Display *dpy, Window win,
          ; /*no-op*/
       }
 
+      CheckEGLDieOnError();
+
       if (redraw) {
          draw();
+         CheckEGLDieOnError();
          eglSwapBuffers(egl_dpy, egl_surf);
+         CheckEGLDieOnError();
       }
    }
+
+   eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
 
 
@@ -452,6 +495,7 @@ main(int argc, char *argv[])
    EGLSurface egl_surf;
    EGLContext egl_ctx;
    EGLDisplay egl_dpy;
+   EGLConfig egl_cfg;
    char *dpyName = NULL;
    GLboolean printInfo = GL_FALSE;
    EGLint egl_major, egl_minor;
@@ -509,7 +553,7 @@ main(int argc, char *argv[])
 #endif
    make_x_window(x_dpy, egl_dpy,
                  window_title, 0, 0, winWidth, winHeight,
-                 &win, &egl_ctx, &egl_surf);
+                 &win, &egl_ctx, &egl_surf, &egl_cfg);
 
    XMapWindow(x_dpy, win);
    if (!eglMakeCurrent(egl_dpy, egl_surf, egl_surf, egl_ctx)) {
@@ -532,7 +576,26 @@ main(int argc, char *argv[])
     */
    reshape(winWidth, winHeight);
 
-   event_loop(x_dpy, win, egl_dpy, egl_surf);
+   struct egl_context_t event_params;
+   event_params.x_dpy = x_dpy;
+   event_params.win = win;
+   event_params.egl_dpy = egl_dpy;
+   event_params.egl_surf = egl_surf;
+   event_params.egl_cfg = egl_cfg;
+   event_params.egl_ctx = egl_ctx;  // shared context
+
+   CheckEGLDieOnError();
+   eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+   CheckEGLDieOnError();
+
+
+   pthread_t tid;
+   if(pthread_create(&tid, NULL, &event_loop, (void*)&event_params)!=0) {
+       printf("thread create error\n");
+   }
+   if(pthread_join(tid, NULL)!=0) {
+       printf("thread join error\n");
+   }
 
    eglDestroyContext(egl_dpy, egl_ctx);
    eglDestroySurface(egl_dpy, egl_surf);
