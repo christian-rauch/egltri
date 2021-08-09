@@ -9,7 +9,7 @@
  * Draw a triangle with X/EGL and OpenGL ES 2.x or OpenGL
  */
 
-// gcc egltri.c -o egltri -lEGL -lm -lGL -lX11 -DUSE_FULL_GL=1
+// gcc egltri.c -o egltri -lEGL -lm -lOpenGL -lX11 -DUSE_FULL_GL=1
 
 #ifndef USE_FULL_GL
     #define USE_FULL_GL 1
